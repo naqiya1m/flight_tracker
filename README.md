@@ -6,4 +6,4 @@ Materials used:
 - 1.54 LCD screen
 - breadboard/jumper wires
 
-API used: https://opensky-network.org/api/states/all?
+API used: https://opensky-network.org/api/states/all
