@@ -8,13 +8,13 @@
 #include <math.h>
 
 // -------- YOUR SETTINGS --------
-//Wifi coordinates *replace with your own*
-const char* WIFI_SSID     = "WIFI_USERNAME";
-const char* WIFI_PASSWORD = "WIFI_PASSWORD"; 
+//*replace with your own wifi info*
+const char* WIFI_SSID     = "WIFI_NAME";
+const char* WIFI_PASSWORD = "WIFI_PASSWORD";
 
 //coordinates of NYC *replace with your own*
-const double HOME_LAT = 42.7466;
-const double HOME_LON = -75.7700; 
+const double HOME_LAT = 40.7128;
+const double HOME_LON = 74.0060;
 const double RADIUS_KM = 5.0;
 // -------------------------------
 
@@ -24,6 +24,13 @@ constexpr int PIN_TFT_DC   = 15;
 constexpr int PIN_TFT_RST  = 27;
 constexpr int PIN_TFT_SCK  = 18;
 constexpr int PIN_TFT_MOSI = 19;
+
+// Piezo buzzer: positive pin to GP14, other pin to GND
+constexpr int PIN_BUZZER = 14;
+
+//buzzer duration and frequency *replace with your own*
+constexpr uint32_t BUZZER_DURATION_MS = 1000;
+constexpr uint16_t BUZZER_FREQUENCY_HZ = 3000;
 
 Adafruit_ST7789 tft(PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
 
@@ -44,13 +51,17 @@ Aircraft aircraft[MAX_AIRCRAFT];
 int aircraftCount = 0;
 uint32_t lastFetch = 0;
 
+String lastDisplayedAircraft = "";
+uint32_t buzzerOffAt = 0;
+bool buzzerActive = false;
+
 const uint16_t BG = ST77XX_BLACK;
 const uint16_t FG = ST77XX_WHITE;
 const uint16_t ACCENT = ST77XX_CYAN;
 const uint16_t MUTED = 0x9CF3;
 const uint16_t PANEL = 0x18E3;
 
-// Draw a readable compass arrow. 0° is north, 90° east, etc.
+// Draw a readable compass arrow. 0° is north, 90° is east, etc.
 void drawDirectionArrow(int cx, int cy, double headingDeg) {
   if (headingDeg < 0) {
     tft.setTextSize(2);
@@ -85,7 +96,6 @@ void drawDirectionArrow(int cx, int cy, double headingDeg) {
     ST77XX_YELLOW
   );
 
-  // Small center dot
   tft.fillCircle(cx, cy, 3, ST77XX_YELLOW);
 }
 
@@ -185,6 +195,21 @@ double distanceKm(double lat1, double lon1, double lat2, double lon2) {
   return earthKm * 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
 }
 
+void startBuzzerForTwoSeconds() {
+  // Stop any previous tone, then start a new one.
+  noTone(PIN_BUZZER);
+  tone(PIN_BUZZER, BUZZER_FREQUENCY_HZ);
+  buzzerActive = true;
+  buzzerOffAt = millis() + BUZZER_DURATION_MS;
+}
+
+void updateBuzzer() {
+  if (buzzerActive && (int32_t)(millis() - buzzerOffAt) >= 0) {
+    noTone(PIN_BUZZER);
+    buzzerActive = false;
+  }
+}
+
 void drawStatus(const String& message) {
   tft.fillRect(0, 226, 240, 14, BG);
   tft.setTextSize(1);
@@ -197,7 +222,6 @@ void drawScreen() {
   tft.fillScreen(BG);
   tft.setTextWrap(false);
 
-  // Header
   tft.setTextSize(2);
   tft.setTextColor(ACCENT, BG);
   tft.setCursor(8, 7);
@@ -241,7 +265,6 @@ void drawScreen() {
 
   Aircraft& closest = aircraft[closestIndex];
 
-  // Callsign
   tft.setTextColor(FG, BG);
   tft.setTextSize(3);
   tft.setCursor(8, 39);
@@ -249,7 +272,6 @@ void drawScreen() {
   if (label.length() > 10) label = label.substring(0, 10);
   tft.print(label);
 
-  // Country flag and registration country
   drawCountryFlag(closest.country, 8, 82);
   tft.setTextSize(2);
   tft.setTextColor(FG, BG);
@@ -259,7 +281,6 @@ void drawScreen() {
   if (countryLabel.length() == 0) countryLabel = "Unknown";
   tft.print(countryLabel);
 
-  // Heading arrow and compass direction
   tft.drawRoundRect(8, 119, 105, 86, 8, PANEL);
   tft.setTextSize(1);
   tft.setTextColor(MUTED, BG);
@@ -273,7 +294,6 @@ void drawScreen() {
   tft.setCursor(43, 184);
   tft.print(compassDirection(closest.headingDeg));
 
-  // Distance and altitude cards
   tft.drawRoundRect(121, 119, 111, 40, 8, PANEL);
   tft.setTextSize(1);
   tft.setTextColor(MUTED, BG);
@@ -304,7 +324,6 @@ void drawScreen() {
 }
 
 bool fetchAircraft() {
-  // Build a bounding box, then filter to the exact radius.
   const double latDelta = RADIUS_KM / 111.0;
   const double lonScale = cos(radians(HOME_LAT));
   const double lonDelta =
@@ -353,8 +372,6 @@ bool fetchAircraft() {
   JsonArray states = doc["states"].as<JsonArray>();
 
   for (JsonVariant row : states) {
-    // Index 0: ICAO24, 1: callsign, 2: registration country,
-    // 5: longitude, 6: latitude, 7: altitude metres, 10: heading.
     if (row.isNull() || row.size() < 11) continue;
     if (row[5].isNull() || row[6].isNull()) continue;
 
@@ -376,7 +393,43 @@ bool fetchAircraft() {
     if (aircraftCount >= MAX_AIRCRAFT) break;
   }
 
+  // Pick closest aircraft for comparison with the one already displayed.
+  String currentDisplayedAircraft = "";
+  if (aircraftCount > 0) {
+    int closestIndex = 0;
+    double closestDistance = distanceKm(
+        HOME_LAT, HOME_LON,
+        aircraft[0].lat, aircraft[0].lon
+    );
+
+    for (int i = 1; i < aircraftCount; i++) {
+      double d = distanceKm(
+          HOME_LAT, HOME_LON,
+          aircraft[i].lat, aircraft[i].lon
+      );
+      if (d < closestDistance) {
+        closestIndex = i;
+        closestDistance = d;
+      }
+    }
+    currentDisplayedAircraft = aircraft[closestIndex].icao24;
+  }
+
   drawScreen();
+
+  // Buzz when a new/different aircraft becomes the displayed closest plane.
+  if (currentDisplayedAircraft.length() > 0 &&
+      currentDisplayedAircraft != lastDisplayedAircraft) {
+    lastDisplayedAircraft = currentDisplayedAircraft;
+    startBuzzerForTwoSeconds();
+  }
+
+  // If no plane is found, clear the remembered aircraft. If one appears later,
+  // it will count as newly displayed and buzz.
+  if (aircraftCount == 0) {
+    lastDisplayedAircraft = "";
+  }
+
   return true;
 }
 
@@ -399,6 +452,9 @@ void connectWiFi() {
 void setup() {
   Serial.begin(115200);
 
+  pinMode(PIN_BUZZER, OUTPUT);
+  noTone(PIN_BUZZER);
+
   SPI.setSCK(PIN_TFT_SCK);
   SPI.setTX(PIN_TFT_MOSI);
   SPI.begin();
@@ -412,6 +468,8 @@ void setup() {
 }
 
 void loop() {
+  updateBuzzer();
+
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.disconnect();
     connectWiFi();
@@ -423,5 +481,6 @@ void loop() {
     fetchAircraft();
   }
 
-  delay(100);
+  updateBuzzer();
+  delay(10);
 }
