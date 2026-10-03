@@ -29,8 +29,8 @@ constexpr int PIN_TFT_MOSI = 19;
 constexpr int PIN_BUZZER = 14;
 
 //buzzer duration and frequency *replace with your own*
-constexpr uint32_t BUZZER_DURATION_MS = 1000;
-constexpr uint16_t BUZZER_FREQUENCY_HZ = 3000;
+constexpr uint32_t BUZZER_DURATION_MS = 300;
+constexpr uint16_t BUZZER_FREQUENCY_HZ = 2500;
 
 Adafruit_ST7789 tft(PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
 
