@@ -1,4 +1,17 @@
 # flight_tracker
+
+[main project]
+This is a pendant that will connect to the internet via bluetooth from a device, allowing it to grab and display the flight information of any plane within 5km of your location which was taken using GPS. Very similar to the prototype in terms of features and display, but still a work in progress. 
+
+The schematic, pcb, and gerber files are all included, but it has yet to be built and tested. 
+
+Materials:
+- screen --> Waveshare 0.71-inch Round IPS LCD
+- microcontroller --> Seeed Studio XIAO ESP32-C3
+- buzzer ---> Same Sky CPT-0303
+- battery ---> LP401522 LiPo Battery
+
+[prototype]
 This is a raspberry pi pico w connected to an LCD screen that detects live flights within 5km, buzzes, and then displays the callsign, altitude, km away, country origin, and an arrow pointing in the flight direction.
 
 Materials used:
